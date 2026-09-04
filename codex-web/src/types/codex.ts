@@ -1,0 +1,17 @@
+export type Theme = "light" | "dark" | "system";
+export type TaskStatus = "pending" | "ready" | "running" | "completed" | "failed" | "blocked";
+export type GoalStatus = "draft" | "discovering" | "planning" | "awaiting_approval" | "executing" | "paused" | "completed" | "failed";
+export type QuestionOption = { label: string; value: string; description?: string };
+export type CodexQuestion = { id: string; goalId: string; type: "text" | "checkbox" | "radio" | "select" | "multi_field" | "confirmation"; title: string; description?: string; options?: QuestionOption[]; required: boolean; defaultValue?: unknown };
+export type Task = { id: string; title: string; phase: string; status: TaskStatus; progress: number; summary: string; files: string[]; dependencies: string[]; agent: string };
+export type GoalSnapshot = { goal: Goal; tasks: Task[]; messages?: ChatMessage[]; activity?: Activity[]; questions?: CodexQuestion[]; serverSequence: number };
+export type ChatMessage = { id: string; role: "user" | "codex" | "system"; content: string; time: string };
+export type Activity = { id: string; time: string; kind: "success" | "working" | "warning" | "error"; text: string };
+export type Goal = { id: string; title: string; objective: string; status: GoalStatus; progress: number; requirements: { id: string; text: string; checked: boolean }[]; successCriteria: { id: string; text: string; checked: boolean }[] };
+export type FileNode = { id: string; name: string; type: "file" | "folder"; children?: FileNode[]; language?: string; updatedAt?: string; size?: string; content?: string };
+export type Change = { id: string; path: string; status: "created" | "modified" | "deleted"; additions: number; deletions: number; summary: string; diff: string[] };
+export type TestResult = { id: string; name: string; group: "Unit" | "Integration" | "Quality" | "Build"; status: "passed" | "failed" | "running" | "pending"; duration?: string; details?: string };
+export type TerminalEntry = { id: string; type: "command" | "output" | "success" | "error"; content: string };
+export type Approval = { id: string; goalId: string; title: string; description: string; risk: "low" | "medium" | "high"; requestedAt: string; items: { label: string; detail: string; selected: boolean }[]; status: "pending" | "approved" | "rejected" };
+export type TimelineEvent = { id: string; time: string; title: string; description: string; type: "goal" | "plan" | "task" | "test" | "approval" | "error" };
+export type CodexEvent = ({ type: "goal.snapshot"; snapshot: GoalSnapshot } | { type: "goal.updated"; goal: Partial<Goal> } | { type: "task.progress"; task_id: string; progress: number; message: string } | { type: "task.completed"; task_id: string } | { type: "question.created"; question: CodexQuestion } | { type: "terminal.output"; output: string } | { type: "test.result"; name: string; status: "passed" | "failed"; details?: string } | { type: "activity"; activity: Activity }) & { goal_id?: string; sequence?: number };
