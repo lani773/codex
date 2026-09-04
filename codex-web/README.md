@@ -2,6 +2,8 @@
 
 React + TypeScript + Vite control center for a persistent, goal-driven Codex run. The backend is authoritative: React renders received state and sends typed commands.
 
+The full backend architecture, API contract, security rules, rollout plan, and test matrix are in [BACKEND_API_PLAN.md](./BACKEND_API_PLAN.md).
+
 ## Run locally
 
 ```sh

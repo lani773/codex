@@ -1,43 +1,364 @@
-import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { activities, approvals as initialApprovals, changes, files, goal as initialGoal, messages as initialMessages, tasks as initialTasks, terminalEntries, testResults, timeline } from "./data/demo";
+import { useCallback, useState } from "react";
+import { INITIAL_STATE, goalReducer } from "./hooks/useGoalReducer";
+import { useWebSocket } from "./hooks/useWebSocket";
+import { GoalBuilderPage } from "./pages/GoalBuilderPage";
+import { GoalPage } from "./pages/GoalPage";
+import { TasksPage } from "./pages/TasksPage";
+import { PlanPage } from "./pages/PlanPage";
 import { ApprovalsPage } from "./pages/ApprovalsPage";
 import { ChangesPage } from "./pages/ChangesPage";
-import { ChatPage } from "./pages/ChatPage";
 import { FilesPage } from "./pages/FilesPage";
-import { GoalPage } from "./pages/GoalPage";
-import { GoalBuilderPage } from "./pages/GoalBuilderPage";
-import { PlanPage } from "./pages/PlanPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { TasksPage } from "./pages/TasksPage";
-import { TerminalPage } from "./pages/TerminalPage";
 import { TestsPage } from "./pages/TestsPage";
+import { TerminalPage } from "./pages/TerminalPage";
 import { TimelinePage } from "./pages/TimelinePage";
+import { ChatPage } from "./pages/ChatPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
-import { WebSocketManager, type ConnectionState } from "./services/websocket/WebSocketManager";
-import { GoalClient } from "./services/api/GoalClient";
-import type { Activity, Approval, ChatMessage, CodexQuestion, Goal, Task, Theme } from "./types/codex";
-const navigation = [{ label: "Workspace", icon: "◈", path: "/" }, { label: "Chat", icon: "◌", path: "/chat" }, { label: "Goal", icon: "◎", path: "/goal" }, { label: "Plan", icon: "⌘", path: "/plan" }, { label: "Tasks", icon: "✓", path: "/tasks" }, { label: "Files", icon: "▱", path: "/files" }, { label: "Changes", icon: "↗", path: "/changes" }, { label: "Terminal", icon: ">_", path: "/terminal" }, { label: "Tests", icon: "⚗", path: "/tests" }, { label: "Approvals", icon: "!", path: "/approvals" }, { label: "Timeline", icon: "◷", path: "/timeline" }, { label: "Settings", icon: "◐", path: "/settings" }, { label: "New goal", icon: "+", path: "/new" }] as const;
-type View = (typeof navigation)[number]["label"];
-const pendingQuestion: CodexQuestion = { id: "security-mode", goalId: "goal_aurora", type: "radio", title: "Which remote-access model should we use?", description: "This determines how we design identity and device authorization.", required: true, options: [{ label: "Local only", value: "local" }, { label: "Local + opt-in cloud", value: "hybrid" }, { label: "Cloud managed", value: "cloud" }] };
-const mockMode = import.meta.env.VITE_USE_MOCKS !== "false";
-const emptyGoal: Goal = { id: "", title: "Loading goal…", objective: "Waiting for authoritative Codex state.", status: "draft", progress: 0, requirements: [], successCriteria: [] };
-const headings: Record<View, [string, string, string]> = { Workspace: ["EXECUTION OVERVIEW", "Good morning, Salline.", "Your goal is actively progressing. Here’s what matters right now."], Chat: ["CONVERSATION", "Stay in the loop.", "Give Codex decisions, feedback, and new direction without losing goal context."], Goal: ["GOAL WORKSPACE", "Shape the outcome.", "Review scope, requirements, and the conditions that must be verified."], Plan: ["PLAN", "See the route to done.", "Tasks, dependencies, and execution state are always driven by Codex."], Tasks: ["TASK QUEUE", "Inspect the work.", "Open a task to see its useful execution summary and affected files."], Files: ["PROJECT", "Browse the repository.", "Files are loaded on demand rather than copied into your browser."], Changes: ["REVIEW", "Understand each change.", "Review proposed modifications before approving anything sensitive."], Terminal: ["EXECUTION OUTPUT", "Follow command activity.", "Codex streams backend execution safely; this browser never executes commands."], Tests: ["VERIFICATION", "Trust the evidence.", "A goal is complete only after the backend verifies its success criteria."], Approvals: ["SECURITY CHECKPOINT", "Make decisions explicitly.", "Review exactly what Codex is requesting before authorizing sensitive work."], Timeline: ["ACTIVITY HISTORY", "See the whole story.", "Follow the decisions and state changes that move your goal toward verification."], Settings: ["PREFERENCES", "Make the workspace yours.", "Choose appearance, model routing preferences, and notification behavior."], "New goal": ["GOAL BUILDER", "What would you like to build?", "Start with an idea; Codex will help you make it executable."] };
-export default function App() { const location = useLocation(); const navigate = useNavigate(); const view = navigation.find((item) => item.path === location.pathname)?.label ?? "Workspace"; const [theme, setTheme] = useState<Theme>((localStorage.getItem("theme") as Theme) || "system"); const [connection, setConnection] = useState<ConnectionState>(mockMode ? "connected" : "connecting"); const [goal, setGoal] = useState<Goal>(mockMode ? initialGoal : emptyGoal); const [tasks, setTasks] = useState<Task[]>(mockMode ? initialTasks : []); const [messages, setMessages] = useState<ChatMessage[]>(mockMode ? initialMessages : []); const [activity, setActivity] = useState<Activity[]>(mockMode ? activities : []); const [approvals, setApprovals] = useState<Approval[]>(mockMode ? initialApprovals : []); const [draft, setDraft] = useState(""); const [paused, setPaused] = useState(false); const [question, setQuestion] = useState<CodexQuestion | undefined>(mockMode ? pendingQuestion : undefined); const ws = useRef<WebSocketManager | null>(null); const lastSequence = useRef(-1); const [eyebrow, title, description] = headings[view];
- useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("theme", theme); }, [theme]);
- useEffect(() => { if (mockMode) return; ws.current = new WebSocketManager(import.meta.env.VITE_CODEX_WS_URL ?? "ws://localhost:8787/ws", setConnection); const unsubscribe = ws.current.subscribe((event) => { if (event.sequence !== undefined && event.sequence <= lastSequence.current) return; if (event.sequence !== undefined) lastSequence.current = event.sequence; if (event.type === "goal.snapshot") { setGoal(event.snapshot.goal); setTasks(event.snapshot.tasks); setMessages(event.snapshot.messages ?? []); setActivity(event.snapshot.activity ?? []); setQuestion(event.snapshot.questions?.[0]); lastSequence.current = event.snapshot.serverSequence; } if (event.type === "task.progress") setTasks((items) => items.map((task) => task.id === event.task_id ? { ...task, progress: event.progress, summary: event.message, status: "running" } : task)); if (event.type === "task.completed") setTasks((items) => items.map((task) => task.id === event.task_id ? { ...task, status: "completed", progress: 100 } : task)); if (event.type === "goal.updated") setGoal((current) => ({ ...current, ...event.goal })); if (event.type === "question.created") setQuestion(event.question); if (event.type === "activity") setActivity((items) => [event.activity, ...items]); }); ws.current.connect(); return () => { unsubscribe(); ws.current?.disconnect(); }; }, []);
- useEffect(() => { if (mockMode || connection !== "connected") return; const goalId = import.meta.env.VITE_CODEX_GOAL_ID; if (!goalId) return; let active = true; void new GoalClient().getState(goalId).then((snapshot) => { if (!active) return; lastSequence.current = snapshot.serverSequence; setGoal(snapshot.goal); setTasks(snapshot.tasks); setMessages(snapshot.messages ?? []); setActivity(snapshot.activity ?? []); setQuestion(snapshot.questions?.[0]); }).catch(() => { if (active) setActivity((items) => [{ id: crypto.randomUUID(), time: "Now", kind: "warning", text: "Could not synchronize the current goal state." }, ...items]); }); return () => { active = false; }; }, [connection]);
- const addActivity = (text: string, kind: Activity["kind"] = "working") => setActivity((items) => [{ id: crypto.randomUUID(), time: "Now", kind, text }, ...items]);
- const send = () => { if (!draft.trim()) return; const content = draft.trim(); setMessages((items) => [...items, { id: crypto.randomUUID(), role: "user", content, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }]); ws.current?.send({ type: "chat.message", goal_id: goal.id, content }); setDraft(""); addActivity("New direction sent to Codex"); };
- const answer = (answerValue: unknown) => { ws.current?.send({ type: "question.answer", question_id: question?.id, answer: answerValue }); setQuestion(undefined); addActivity("Security decision sent to Codex", "success"); };
- const attach = (selectedFiles: FileList | null) => { if (selectedFiles?.length) addActivity(`Attached ${[...selectedFiles].map((file) => file.name).join(", ")}`); };
- const toggleRequirement = (id: string) => setGoal((current) => ({ ...current, requirements: current.requirements.map((requirement) => requirement.id === id ? { ...requirement, checked: !requirement.checked } : requirement) }));
- const addRequirement = (text: string) => setGoal((current) => ({ ...current, requirements: [...current.requirements, { id: crypto.randomUUID(), text, checked: false }] }));
- const createGoal = async (title: string, objective: string) => { if (mockMode) { setGoal({ id: crypto.randomUUID(), title, objective, status: "discovering", progress: 8, requirements: [], successCriteria: [] }); setTasks([]); setMessages([{ id: crypto.randomUUID(), role: "codex", content: "I’m developing your idea into objective, requirements, and success criteria. I’ll ask only the decisions that affect the plan.", time: "Now" }]); setQuestion(undefined); addActivity("New goal created", "success"); navigate("/goal"); return; } const created = await new GoalClient().create({ title, objective }); setGoal(created); setTasks([]); setMessages([]); setQuestion(undefined); ws.current?.subscribeToGoal(created.id); addActivity("New goal created", "success"); navigate("/goal"); };
- const decideApproval = (approvalId: string, decision: "approved" | "rejected") => { ws.current?.send({ type: "approval.decide", approval_id: approvalId, decision }); setApprovals((items) => items.map((approval) => approval.id === approvalId ? { ...approval, status: decision } : approval)); addActivity(`Approval ${decision}`, decision === "approved" ? "success" : "warning"); };
- return <main className="app-shell"><Header goal={goal} theme={theme} connection={connection} onThemeChange={setTheme} onCreateGoal={() => navigate("/new")} /><Sidebar view={view} onNavigate={navigate} /><section className="workspace"><div className="workspace-heading"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{view !== "Settings" && view !== "New goal" && <div className="controls"><button onClick={() => { setPaused(!paused); addActivity(paused ? "Execution resumed" : "Execution paused"); }}>{paused ? "▶ Resume" : "Ⅱ Pause"}</button><button className="danger" onClick={() => window.confirm("Stop this goal? This cancels active tasks.") && setPaused(true)}>■ Stop</button></div>}</div><Page view={view} goal={goal} tasks={tasks} activity={activity} messages={messages} question={question} draft={draft} theme={theme} approvals={approvals} onThemeChange={setTheme} onDraftChange={setDraft} onSend={send} onAnswer={answer} onAttach={attach} onToggleRequirement={toggleRequirement} onAddRequirement={addRequirement} onDecideApproval={decideApproval} onCreateGoal={createGoal} onOpenPlan={() => navigate("/plan")} /></section><Footer paused={paused} progress={goal.progress} /></main> }
-function Header({ goal, theme, connection, onThemeChange, onCreateGoal }: { goal: Goal; theme: Theme; connection: ConnectionState; onThemeChange: (theme: Theme) => void; onCreateGoal: () => void }) { return <header className="topbar"><div className="brand"><span className="brand-mark">C</span><span>CODEX <em>WORKSPACE</em></span></div><button className="goal-switcher" onClick={onCreateGoal}><span className="muted">Goal</span><strong>{goal.title}</strong><span>⌄</span></button><div className="top-actions"><span className={`connection ${connection}`}><i />{connection === "connected" ? "Connected" : connection === "reconnecting" ? "Reconnecting…" : "Connection lost"}</span><select aria-label="Theme" value={theme} onChange={(event) => onThemeChange(event.target.value as Theme)}><option value="system">System theme</option><option value="light">Light</option><option value="dark">Dark</option></select><button className="avatar">SL</button></div></header> }
-function Sidebar({ view, onNavigate }: { view: View; onNavigate: (path: string) => void }) { return <aside className="sidebar"><nav>{navigation.map((item) => <button key={item.label} className={view === item.label ? "nav-item active" : "nav-item"} onClick={() => onNavigate(item.path)}><span>{item.icon}</span>{item.label}</button>)}</nav><div className="agent-card"><span className="eyebrow">ACTIVE AI</span><strong>Automatic routing</strong><p><i className="online" /> Planner · Coding · Tester</p></div></aside> }
-function Footer({ paused, progress }: { paused: boolean; progress: number }) { return <footer><span><i className={paused ? "paused" : "online"} />{paused ? "Execution paused" : "Executing"}</span><div className="footer-progress"><i style={{ width: `${progress}%` }} /></div><span>{progress}% complete</span><span className="muted footer-note">Live state from Codex</span></footer> }
-type PageProps = { view: View; goal: Goal; tasks: Task[]; activity: Activity[]; messages: ChatMessage[]; question?: CodexQuestion; draft: string; theme: Theme; approvals: Approval[]; onThemeChange: (theme: Theme) => void; onDraftChange: (value: string) => void; onSend: () => void; onAnswer: (answer: unknown) => void; onAttach: (files: FileList | null) => void; onToggleRequirement: (id: string) => void; onAddRequirement: (text: string) => void; onDecideApproval: (approvalId: string, decision: "approved" | "rejected") => void; onCreateGoal: (title: string, objective: string) => Promise<void>; onOpenPlan: () => void; };
-function Page(props: PageProps) { switch (props.view) { case "Workspace": return <WorkspacePage goal={props.goal} tasks={props.tasks} activity={props.activity} messages={props.messages} question={props.question} draft={props.draft} onDraftChange={props.onDraftChange} onSend={props.onSend} onAnswer={props.onAnswer} onOpenPlan={props.onOpenPlan} onAttach={props.onAttach} />; case "Chat": return <ChatPage messages={props.messages} draft={props.draft} onDraftChange={props.onDraftChange} onSend={props.onSend} onAttach={props.onAttach} />; case "Goal": return <GoalPage goal={props.goal} onToggleRequirement={props.onToggleRequirement} onAddRequirement={props.onAddRequirement} />; case "Plan": return <PlanPage tasks={props.tasks} />; case "Tasks": return <TasksPage tasks={props.tasks} />; case "Files": return <FilesPage files={files} />; case "Changes": return <ChangesPage changes={changes} />; case "Terminal": return <TerminalPage entries={terminalEntries} />; case "Tests": return <TestsPage results={testResults} />; case "Approvals": return <ApprovalsPage approvals={props.approvals} onDecide={props.onDecideApproval} />; case "Timeline": return <TimelinePage events={timeline} />; case "Settings": return <SettingsPage theme={props.theme} onThemeChange={props.onThemeChange} />; case "New goal": return <GoalBuilderPage onCreate={props.onCreateGoal} />; } }
+import { NotificationBell } from "./components/NotificationBell";
+import { ErrorState } from "./components/EmptyState";
+import { files as demoFiles, changes as demoChanges } from "./data/demo";
+import type { ConnectionState } from "./services/websocket/WebSocketManager";
+import type { GoalAction } from "./hooks/useGoalReducer";
+
+// ─── App Root ─────────────────────────────────────────────────────────────────
+
+export default function App() {
+  const [state, dispatch] = useState(INITIAL_STATE);
+  const [activeTab, setActiveTab] = useState("workspace");
+  const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected");
+  const [chatDraft, setChatDraft] = useState("");
+  const [wsUrl, setWsUrl] = useState(() => {
+    // Determine ws:// or wss:// based on current protocol
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host; // includes port if present
+    // The backend handles /ws, adjust if needed based on proxy config
+    return `${proto}//${host}/ws`;
+  });
+
+  // Setup WebSocket connection and wire it to the reducer
+  const handleEvent = useCallback((event: any) => {
+    // Only dispatch if the event is a valid CodexEvent
+    if (event && event.type) {
+      dispatch((prev) => goalReducer(prev, { type: "WS_EVENT", event }));
+    }
+  }, []);
+
+  const wsManagerRef = useWebSocket({
+    url: wsUrl,
+    enabled: true,
+    onState: setConnectionState,
+    onEvent: handleEvent,
+  });
+
+  const sendCommand = (cmd: any) => {
+    wsManagerRef.current?.send(cmd);
+  };
+
+  // ─── Mock bootstrap ────────────────────────────────────────────────────────
+  
+  // Expose a global hook to load mock data for testing UI offline
+  (window as any).loadMockData = async () => {
+    const demo = await import("./data/demo");
+    dispatch((prev) => goalReducer(prev, {
+      type: "INIT_MOCK",
+      goal: demo.goal,
+      tasks: demo.tasks,
+      messages: demo.messages,
+      activity: demo.activities,
+      approvals: demo.approvals,
+      question: undefined,
+      terminalEntries: demo.terminalEntries,
+      testResults: demo.testResults,
+    }));
+  };
+
+  // ─── Actions ───────────────────────────────────────────────────────────────
+
+  // Goal creation (called by GoalBuilderPage)
+  const handleCreateGoal = async (title: string, objective: string) => {
+    // If we're disconnected, try sending it anyway (WSManager will queue it)
+    sendCommand({
+      type: "goal.update",
+      goal_id: "new_goal", // Backend should replace this or expect a specific creation command
+      patch: { title, objective }
+    });
+    
+    // Optimistic update for the UI if backend doesn't respond immediately
+    dispatch((prev) => goalReducer(prev, {
+      type: "SET_GOAL",
+      goal: {
+        id: "optimistic_goal",
+        title,
+        objective,
+        status: "planning",
+        progress: 0,
+        requirements: [],
+        successCriteria: [],
+      }
+    }));
+    setActiveTab("workspace");
+  };
+
+  // Chat message sending
+  const handleSendMessage = () => {
+    if (!chatDraft.trim()) return;
+    sendCommand({
+      type: "chat.message",
+      goal_id: state.goal.id,
+      content: chatDraft.trim(),
+    });
+    
+    // Optimistic local update
+    dispatch((prev) => goalReducer(prev, {
+      type: "ADD_MESSAGE",
+      message: {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: chatDraft.trim(),
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      }
+    }));
+    setChatDraft("");
+  };
+
+  // ─── Connection Banner ──────────────────────────────────────────────────────
+
+  const renderConnectionBanner = () => {
+    if (connectionState === "connected") return null;
+    return (
+      <div className={`connection-banner ${connectionState}`}>
+        {connectionState === "disconnected" && (
+          <p>
+            <span aria-hidden="true">⚠</span> 
+            Disconnected from backend. Retrying... 
+            <button className="text-button" onClick={() => window.location.reload()}>Reload page</button>
+          </p>
+        )}
+        {connectionState === "connecting" && <p><span className="spinner" aria-hidden="true" /> Connecting to Codex...</p>}
+        {connectionState === "reconnecting" && <p><span className="spinner" aria-hidden="true" /> Reconnecting to Codex...</p>}
+      </div>
+    );
+  };
+
+  // ─── Router / Tab Switcher ────────────────────────────────────────────────
+
+  if (state.goal.status === "draft") {
+    return (
+      <div className="app-container">
+        {renderConnectionBanner()}
+        <header className="app-header">
+          <div className="brand">
+            <span className="logo" aria-hidden="true">⬡</span>
+            <h1>Codex</h1>
+            <span className="version">v0.1</span>
+          </div>
+        </header>
+        <main className="app-main">
+          <GoalBuilderPage onCreate={handleCreateGoal} />
+        </main>
+      </div>
+    );
+  }
+
+  const unreadApprovals = state.approvals.filter(a => a.status === "pending").length;
+
+  return (
+    <div className="app-container layout-sidebar">
+      {renderConnectionBanner()}
+      <aside className="sidebar" role="navigation" aria-label="Main navigation">
+        <div className="brand">
+          <span className="logo" aria-hidden="true">⬡</span>
+          <h1>Codex</h1>
+          <span className="version">v0.1</span>
+        </div>
+
+        <nav className="nav-group">
+          <button
+            className={activeTab === "workspace" ? "nav-link active" : "nav-link"}
+            onClick={() => setActiveTab("workspace")}
+          >
+            Workspace
+          </button>
+          <button
+            className={activeTab === "goal" ? "nav-link active" : "nav-link"}
+            onClick={() => setActiveTab("goal")}
+          >
+            Goal & Scope
+          </button>
+          <button
+            className={activeTab === "plan" ? "nav-link active" : "nav-link"}
+            onClick={() => setActiveTab("plan")}
+          >
+            Execution Plan
+          </button>
+          <button
+            className={activeTab === "tasks" ? "nav-link active" : "nav-link"}
+            onClick={() => setActiveTab("tasks")}
+          >
+            Tasks
+          </button>
+          <button
+            className={activeTab === "chat" ? "nav-link active" : "nav-link"}
+            onClick={() => setActiveTab("chat")}
+          >
+            Chat
+          </button>
+        </nav>
+
+        <nav className="nav-group nav-group-secondary">
+          <span className="nav-group-label">Verification</span>
+          <button
+            className={activeTab === "files" ? "nav-link active" : "nav-link"}
+            onClick={() => setActiveTab("files")}
+          >
+            Files
+          </button>
+          <button
+            className={activeTab === "changes" ? "nav-link active" : "nav-link"}
+            onClick={() => setActiveTab("changes")}
+          >
+            Changes
+          </button>
+          <button
+            className={activeTab === "tests" ? "nav-link active" : "nav-link"}
+            onClick={() => setActiveTab("tests")}
+          >
+            Tests
+          </button>
+        </nav>
+
+        <nav className="nav-group nav-group-secondary">
+          <span className="nav-group-label">System</span>
+          <button
+            className={activeTab === "approvals" ? "nav-link active" : "nav-link"}
+            onClick={() => setActiveTab("approvals")}
+          >
+            Approvals
+            {unreadApprovals > 0 && <span className="badge danger">{unreadApprovals}</span>}
+          </button>
+          <button
+            className={activeTab === "terminal" ? "nav-link active" : "nav-link"}
+            onClick={() => setActiveTab("terminal")}
+          >
+            Terminal
+          </button>
+          <button
+            className={activeTab === "timeline" ? "nav-link active" : "nav-link"}
+            onClick={() => setActiveTab("timeline")}
+          >
+            Timeline
+          </button>
+        </nav>
+
+        <div className="sidebar-footer">
+          <NotificationBell
+            count={state.activity.length}
+            unread={0}
+            onClick={() => setActiveTab("timeline")}
+          />
+          <button className="theme-toggle" onClick={() => {
+            const current = document.documentElement.getAttribute("data-theme");
+            document.documentElement.setAttribute("data-theme", current === "light" ? "dark" : "light");
+          }}>
+            ◑
+          </button>
+        </div>
+      </aside>
+
+      <main className="app-main main-content">
+        {activeTab === "workspace" && (
+          <WorkspacePage
+            goal={state.goal}
+            tasks={state.tasks}
+            activity={state.activity}
+            messages={state.messages}
+            question={state.question}
+            draft={chatDraft}
+            agents={state.agents}
+            providers={state.providers}
+            onDraftChange={setChatDraft}
+            onSend={handleSendMessage}
+            onAnswer={(answer) => {
+              if (state.question) {
+                sendCommand({ type: "question.answer", question_id: state.question.id, answer });
+                dispatch((prev) => goalReducer(prev, { type: "DISMISS_QUESTION" }));
+              }
+            }}
+            onOpenPlan={() => setActiveTab("plan")}
+            onAttach={(files) => console.log("Attach files:", files)}
+          />
+        )}
+
+        {activeTab === "goal" && (
+          <GoalPage
+            goal={state.goal}
+            onToggleRequirement={(id) => dispatch((prev) => goalReducer(prev, { type: "TOGGLE_REQUIREMENT", id }))}
+            onAddRequirement={(text) => dispatch((prev) => goalReducer(prev, { type: "ADD_REQUIREMENT", text }))}
+            onDeleteRequirement={(id) => dispatch((prev) => goalReducer(prev, { type: "DELETE_REQUIREMENT", id }))}
+            onToggleCriterion={(id) => dispatch((prev) => goalReducer(prev, { type: "TOGGLE_CRITERION", id }))}
+            onAddCriterion={(text) => dispatch((prev) => goalReducer(prev, { type: "ADD_CRITERION", text }))}
+            onDeleteCriterion={(id) => dispatch((prev) => goalReducer(prev, { type: "DELETE_CRITERION", id }))}
+            onUpdateObjective={(objective) => dispatch((prev) => goalReducer(prev, { type: "UPDATE_OBJECTIVE", objective }))}
+          />
+        )}
+
+        {activeTab === "plan" && (
+          <PlanPage
+            tasks={state.tasks}
+            goalStatus={state.goal.status}
+            onApprovePlan={() => sendCommand({ type: "plan.approve", goal_id: state.goal.id })}
+            onRetryTask={(taskId) => sendCommand({ type: "task.retry", goal_id: state.goal.id, task_id: taskId })}
+          />
+        )}
+
+        {activeTab === "tasks" && (
+          <TasksPage
+            tasks={state.tasks}
+            onRetryTask={(taskId) => sendCommand({ type: "task.retry", goal_id: state.goal.id, task_id: taskId })}
+          />
+        )}
+
+        {activeTab === "chat" && (
+          <ChatPage
+            messages={state.messages}
+            draft={chatDraft}
+            onDraftChange={setChatDraft}
+            onSend={handleSendMessage}
+            onAttach={(files) => console.log("Attach files:", files)}
+          />
+        )}
+
+        {activeTab === "files" && (
+          <FilesPage
+            files={demoFiles as any} // Still using mock files for demo purposes until backend sends them
+            onLoadFile={(id) => console.log("Load file content:", id)}
+          />
+        )}
+
+        {activeTab === "changes" && (
+          <ChangesPage
+            changes={demoChanges as any} // Still using mock changes
+            onApproveAll={() => console.log("Approve all changes")}
+            onApproveChange={(id) => console.log("Approve change:", id)}
+            onRejectChange={(id) => console.log("Reject change:", id)}
+          />
+        )}
+
+        {activeTab === "tests" && <TestsPage results={state.testResults} />}
+
+        {activeTab === "approvals" && (
+          <ApprovalsPage
+            approvals={state.approvals}
+            onDecide={(approvalId, decision) => {
+              sendCommand({ type: "approval.decide", approval_id: approvalId, decision });
+              dispatch((prev) => goalReducer(prev, { type: "DECIDE_APPROVAL", approvalId, decision }));
+            }}
+          />
+        )}
+
+        {activeTab === "terminal" && <TerminalPage entries={state.terminalEntries} />}
+
+        {activeTab === "timeline" && <TimelinePage events={[]} />}
+      </main>
+    </div>
+  );
+}

@@ -14,6 +14,39 @@ class MockWebSocket {
   open() { this.readyState = MockWebSocket.OPEN; this.onopen?.(); }
   message(data: unknown) { this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent); }
 }
-afterEach(() => { MockWebSocket.instances = []; vi.useRealTimers(); });
-test("authenticates, syncs state, and routes typed events", () => { vi.stubGlobal("WebSocket", MockWebSocket); const onState = vi.fn(); const onEvent = vi.fn(); const manager = new WebSocketManager("ws://localhost/ws", onState, "token-1"); manager.subscribe(onEvent); manager.connect(); const socket = MockWebSocket.instances[0]; socket.open(); expect(onState).toHaveBeenLastCalledWith("connected"); expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "session.authenticate", token: "token-1" })); expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "state.sync" })); socket.message({ type: "task.progress", task_id: "task-1", progress: 50, message: "Coding" }); expect(onEvent).toHaveBeenCalledWith({ type: "task.progress", task_id: "task-1", progress: 50, message: "Coding" }); manager.disconnect(); });
-test("reconnects with backoff after an unexpected close", () => { vi.useFakeTimers(); vi.stubGlobal("WebSocket", MockWebSocket); const manager = new WebSocketManager("ws://localhost/ws", vi.fn()); manager.connect(); MockWebSocket.instances[0].close(); vi.advanceTimersByTime(2_000); expect(MockWebSocket.instances).toHaveLength(2); manager.disconnect(); });
+
+beforeEach(() => {
+  vi.stubGlobal("WebSocket", MockWebSocket);
+});
+
+afterEach(() => { 
+  MockWebSocket.instances = []; 
+  vi.useRealTimers(); 
+  vi.unstubAllGlobals(); 
+});
+
+test("authenticates, syncs state, and routes typed events", () => { 
+  const onState = vi.fn(); 
+  const onEvent = vi.fn(); 
+  const manager = new WebSocketManager("ws://localhost/ws", onState, "token-1"); 
+  manager.subscribe(onEvent); 
+  manager.connect(); 
+  const socket = MockWebSocket.instances[0]; 
+  socket.open(); 
+  expect(onState).toHaveBeenLastCalledWith("connected"); 
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "session.authenticate", token: "token-1" })); 
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "state.sync" })); 
+  socket.message({ type: "task.progress", task_id: "task-1", progress: 50, message: "Coding" }); 
+  expect(onEvent).toHaveBeenCalledWith({ type: "task.progress", task_id: "task-1", progress: 50, message: "Coding" }); 
+  manager.disconnect(); 
+});
+
+test("reconnects with backoff after an unexpected close", () => { 
+  vi.useFakeTimers(); 
+  const manager = new WebSocketManager("ws://localhost/ws", vi.fn()); 
+  manager.connect(); 
+  MockWebSocket.instances[0].close(); 
+  vi.advanceTimersByTime(2_000); 
+  expect(MockWebSocket.instances).toHaveLength(2); 
+  manager.disconnect(); 
+});

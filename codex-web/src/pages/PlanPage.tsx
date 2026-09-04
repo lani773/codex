@@ -1,4 +1,106 @@
-import { useState } from "react";
-import type { Task } from "../types/codex";
-export function PlanPage({ tasks }: { tasks: Task[] }) { const [selected, setSelected] = useState(tasks.find((task) => task.status === "running") ?? tasks[0]); const phases = [...new Set(tasks.map((task) => task.phase))]; return <div className="plan-layout"><section className="panel plan-tree"><div className="panel-header"><div><span className="eyebrow">EXECUTION PLAN</span><h2>Smart home delivery</h2></div><button className="primary">Approve plan</button></div>{phases.map((phase, index) => <div className="phase" key={phase}><div className="phase-title"><span>{index + 1}</span><b>{phase}</b><small>{tasks.filter((task) => task.phase === phase && task.status === "completed").length}/{tasks.filter((task) => task.phase === phase).length} complete</small></div>{tasks.filter((task) => task.phase === phase).map((task) => <button className={selected?.id === task.id ? "plan-task selected" : "plan-task"} key={task.id} onClick={() => setSelected(task)}><i className={`status-dot ${task.status}`} /><span>{task.title}</span><small>{task.status}</small></button>)}</div>)}</section>{selected && <aside className="panel task-detail"><span className="eyebrow">{selected.id}</span><h2>{selected.title}</h2><span className={`status-chip ${selected.status}`}>{selected.status}</span><p>{selected.summary}</p><Detail label="Current agent" value={selected.agent} /><Detail label="Progress" value={`${selected.progress}%`} /><Detail label="Dependencies" value={selected.dependencies.length ? selected.dependencies.join(", ") : "None"} /><div className="detail-files"><span>Files</span>{selected.files.map((file) => <button key={file}>▱ {file}</button>)}</div><div className="detail-actions"><button>View task</button>{selected.status === "failed" && <button className="primary">Retry task</button>}</div></aside>}</div> }
-function Detail({ label, value }: { label: string; value: string }) { return <div className="detail-line"><span>{label}</span><b>{value}</b></div> }
+import { useMemo, useState } from "react";
+import { StatusBadge } from "../components/StatusBadge";
+import { ProgressBar } from "../components/ProgressBar";
+import { EmptyState } from "../components/EmptyState";
+import { TaskDrawer } from "../components/TaskDrawer";
+import type { Task, GoalStatus } from "../types/codex";
+
+type Props = {
+  tasks: Task[];
+  goalStatus: GoalStatus;
+  onApprovePlan: () => void;
+  onRetryTask?: (taskId: string) => void;
+};
+
+export function PlanPage({ tasks, goalStatus, onApprovePlan, onRetryTask }: Props) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const phases = useMemo(() => {
+    return [...new Set(tasks.map((task) => task.phase))];
+  }, [tasks]);
+
+  const selectedTask = useMemo(
+    () => tasks.find((t) => t.id === selectedId) ?? null,
+    [tasks, selectedId]
+  );
+
+  return (
+    <div className="plan-layout">
+      <section className="panel plan-main">
+        <div className="panel-header">
+          <div>
+            <span className="eyebrow">EXECUTION PLAN</span>
+            <h2>Delivery map</h2>
+          </div>
+          {goalStatus === "awaiting_approval" && (
+            <button className="primary" onClick={onApprovePlan}>
+              Approve plan
+            </button>
+          )}
+        </div>
+
+        {goalStatus === "awaiting_approval" && (
+          <div className="plan-banner" role="alert">
+            <span aria-hidden="true">!</span>
+            <div>
+              <b>Plan is ready for review</b>
+              <p>Review the tasks below and approve the plan to begin execution.</p>
+            </div>
+          </div>
+        )}
+
+        {tasks.length === 0 ? (
+          <EmptyState
+            title="No plan generated yet"
+            message="Codex is still discovering or planning."
+            icon="⌘"
+          />
+        ) : (
+          <div className="plan-tree">
+            {phases.map((phase, index) => {
+              const phaseTasks = tasks.filter((t) => t.phase === phase);
+              const completed = phaseTasks.filter((t) => t.status === "completed").length;
+              return (
+                <div className="phase" key={phase}>
+                  <div className="phase-title">
+                    <span className="phase-number">{index + 1}</span>
+                    <b>{phase}</b>
+                    <small>
+                      {completed}/{phaseTasks.length} complete
+                    </small>
+                  </div>
+                  <div className="phase-tasks">
+                    {phaseTasks.map((task) => (
+                      <button
+                        key={task.id}
+                        className={
+                          selectedId === task.id ? "plan-task selected" : "plan-task"
+                        }
+                        onClick={() => setSelectedId(task.id)}
+                        aria-label={`View details for ${task.title}`}
+                      >
+                        <i className={`status-dot status-${task.status}`} aria-hidden="true" />
+                        <span className="plan-task-title">{task.title}</span>
+                        <div className="plan-task-status">
+                          <StatusBadge kind="task" status={task.status} />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {selectedId && (
+        <TaskDrawer
+          task={selectedTask}
+          onClose={() => setSelectedId(null)}
+          onRetry={onRetryTask}
+        />
+      )}
+    </div>
+  );
+}
